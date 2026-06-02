@@ -1,0 +1,117 @@
+/* ── Reset & Root ─────────────────────────────────────────────────────────── */
+*, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+:root {
+  /* Core palette — warm slate + amber accent */
+  --ink:        #0f1117;
+  --ink-soft:   #1e2330;
+  --ink-muted:  #2d3447;
+  --surface:    #f8f6f1;
+  --surface-2:  #f0ede6;
+  --surface-3:  #e8e4db;
+  --border:     #ddd9d0;
+  --border-soft:#e8e4db;
+
+  --text-primary:   #0f1117;
+  --text-secondary: #4a5168;
+  --text-muted:     #8892a4;
+  --text-inverse:   #f8f6f1;
+
+  /* Accent */
+  --amber:      #d97706;
+  --amber-light:#fef3c7;
+  --amber-dark: #92400e;
+
+  /* Status */
+  --green:      #059669;
+  --green-light:#d1fae5;
+  --red:        #dc2626;
+  --red-light:  #fee2e2;
+  --blue:       #2563eb;
+  --blue-light: #dbeafe;
+  --orange:     #ea580c;
+  --orange-light:#ffedd5;
+  --purple:     #7c3aed;
+  --purple-light:#ede9fe;
+
+  /* Layout */
+  --sidebar-w: 256px;
+  --header-h:  60px;
+  --radius:    8px;
+  --radius-lg: 14px;
+  --radius-xl: 20px;
+
+  /* Shadows */
+  --shadow-sm: 0 1px 3px rgba(15,17,23,0.08), 0 1px 2px rgba(15,17,23,0.04);
+  --shadow-md: 0 4px 12px rgba(15,17,23,0.10), 0 2px 4px rgba(15,17,23,0.06);
+  --shadow-lg: 0 12px 32px rgba(15,17,23,0.13), 0 4px 8px rgba(15,17,23,0.06);
+
+  /* Typography */
+  --font-display: 'DM Serif Display', Georgia, serif;
+  --font-body:    'DM Sans', system-ui, sans-serif;
+  --font-mono:    'Fira Code', 'Cascadia Code', monospace;
+}
+
+html, body, #root { height: 100%; }
+
+body {
+  font-family: var(--font-body);
+  background: var(--surface);
+  color: var(--text-primary);
+  line-height: 1.5;
+  -webkit-font-smoothing: antialiased;
+}
+
+/* ── Scrollbar ────────────────────────────────────────────────────────────── */
+::-webkit-scrollbar { width: 5px; height: 5px; }
+::-webkit-scrollbar-track { background: transparent; }
+::-webkit-scrollbar-thumb { background: var(--border); border-radius: 99px; }
+
+/* ── Utility ─────────────────────────────────────────────────────────────── */
+.sr-only { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0,0,0,0); }
+
+/* ── Animations ──────────────────────────────────────────────────────────── */
+@keyframes fadeUp {
+  from { opacity: 0; transform: translateY(12px); }
+  to   { opacity: 1; transform: translateY(0); }
+}
+@keyframes fadeIn {
+  from { opacity: 0; }
+  to   { opacity: 1; }
+}
+@keyframes slideIn {
+  from { transform: translateX(-8px); opacity: 0; }
+  to   { transform: translateX(0);    opacity: 1; }
+}
+@keyframes pulse-dot {
+  0%, 100% { opacity: 1; transform: scale(1); }
+  50%       { opacity: 0.6; transform: scale(0.85); }
+}
+@keyframes spin {
+  to { transform: rotate(360deg); }
+}
+
+.animate-fade-up  { animation: fadeUp  0.35s ease both; }
+.animate-fade-in  { animation: fadeIn  0.25s ease both; }
+.animate-slide-in { animation: slideIn 0.3s  ease both; }
+
+/* ── Notification toast ──────────────────────────────────────────────────── */
+.notif-toast {
+  display: flex; align-items: flex-start; gap: 12;
+  background: var(--ink); color: #fff;
+  padding: 14px 18px; border-radius: 12px;
+  box-shadow: var(--shadow-lg); max-width: 340px;
+  opacity: 0; transform: translateY(8px);
+  transition: all 0.25s ease;
+}
+.notif-toast--in { opacity: 1; transform: translateY(0); }
+.notif-toast__dot {
+  width: 8px; height: 8px; border-radius: 50%;
+  background: var(--amber); flex-shrink: 0; margin-top: 4px;
+  animation: pulse-dot 2s ease infinite;
+}
+.notif-toast__title { font-size: 13px; font-weight: 600; margin-bottom: 3px; }
+.notif-toast__msg   { font-size: 12px; color: rgba(255,255,255,0.65); line-height: 1.4; }
+
+/* ── Table hover fix ─────────────────────────────────────────────────────── */
+tr:hover td { background: inherit !important; }

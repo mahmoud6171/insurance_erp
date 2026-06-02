@@ -1,0 +1,19 @@
+# Python
+__pycache__/
+*.py[cod]
+*.pyo
+.pytest_cache/
+.mypy_cache/
+*.egg-info/
+
+# Django
+db.sqlite3
+media/
+staticfiles/
+*.log
+
+# Dev
+.env
+.git/
+.gitignore
+*.md
