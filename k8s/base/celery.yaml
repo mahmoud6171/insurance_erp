@@ -1,0 +1,105 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: celery-worker
+  namespace: insurance-erp
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: celery-worker
+  template:
+    metadata:
+      labels:
+        app: celery-worker
+    spec:
+      containers:
+        - name: celery-worker
+          image: insurance-erp-backend:latest
+          imagePullPolicy: IfNotPresent
+          env:
+            - name: SECRET_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: insurance-erp-secret
+                  key: SECRET_KEY
+            - name: DEBUG
+              valueFrom:
+                configMapKeyRef:
+                  name: insurance-erp-config
+                  key: DEBUG
+            - name: DATABASE_URL
+              valueFrom:
+                secretKeyRef:
+                  name: insurance-erp-secret
+                  key: DATABASE_URL
+            - name: REDIS_URL
+              valueFrom:
+                secretKeyRef:
+                  name: insurance-erp-secret
+                  key: REDIS_URL
+            - name: ALLOWED_HOSTS
+              valueFrom:
+                configMapKeyRef:
+                  name: insurance-erp-config
+                  key: ALLOWED_HOSTS
+            - name: CORS_ALLOWED_ORIGINS
+              valueFrom:
+                configMapKeyRef:
+                  name: insurance-erp-config
+                  key: CORS_ALLOWED_ORIGINS
+            - name: SERVICE_ROLE
+              value: worker
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: celery-beat
+  namespace: insurance-erp
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: celery-beat
+  template:
+    metadata:
+      labels:
+        app: celery-beat
+    spec:
+      containers:
+        - name: celery-beat
+          image: insurance-erp-backend:latest
+          imagePullPolicy: IfNotPresent
+          env:
+            - name: SECRET_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: insurance-erp-secret
+                  key: SECRET_KEY
+            - name: DEBUG
+              valueFrom:
+                configMapKeyRef:
+                  name: insurance-erp-config
+                  key: DEBUG
+            - name: DATABASE_URL
+              valueFrom:
+                secretKeyRef:
+                  name: insurance-erp-secret
+                  key: DATABASE_URL
+            - name: REDIS_URL
+              valueFrom:
+                secretKeyRef:
+                  name: insurance-erp-secret
+                  key: REDIS_URL
+            - name: ALLOWED_HOSTS
+              valueFrom:
+                configMapKeyRef:
+                  name: insurance-erp-config
+                  key: ALLOWED_HOSTS
+            - name: CORS_ALLOWED_ORIGINS
+              valueFrom:
+                configMapKeyRef:
+                  name: insurance-erp-config
+                  key: CORS_ALLOWED_ORIGINS
+            - name: SERVICE_ROLE
+              value: beat

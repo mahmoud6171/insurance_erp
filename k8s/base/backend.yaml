@@ -1,0 +1,136 @@
+apiVersion: v1
+kind: Service
+metadata:
+  name: backend
+  namespace: insurance-erp
+spec:
+  selector:
+    app: backend
+  ports:
+    - port: 8000
+      targetPort: 8000
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: backend
+  namespace: insurance-erp
+spec:
+  replicas: 2
+  selector:
+    matchLabels:
+      app: backend
+  template:
+    metadata:
+      labels:
+        app: backend
+    spec:
+      initContainers:
+        - name: wait-for-postgres-and-redis
+          image: python:3.11-slim
+          command: ["sh", "-c"]
+          args:
+            - |
+              pip install --no-cache-dir dj-database-url psycopg2-binary redis python-decouple >/dev/null 2>&1 || true
+              python - <<'PY'
+              import os, time
+              import dj_database_url, psycopg2, redis
+              from decouple import config
+              db_url = os.environ.get('DATABASE_URL')
+              r_url = os.environ.get('REDIS_URL')
+              while True:
+                  try:
+                      p = dj_database_url.parse(db_url)
+                      psycopg2.connect(host=p['HOST'], port=p['PORT'] or 5432, dbname=p['NAME'], user=p['USER'], password=p['PASSWORD']).close()
+                      redis.from_url(r_url).ping()
+                      break
+                  except Exception:
+                      time.sleep(2)
+              PY
+          env:
+            - name: DATABASE_URL
+              valueFrom:
+                secretKeyRef:
+                  name: insurance-erp-secret
+                  key: DATABASE_URL
+            - name: REDIS_URL
+              valueFrom:
+                secretKeyRef:
+                  name: insurance-erp-secret
+                  key: REDIS_URL
+      containers:
+        - name: backend
+          image: insurance-erp-backend:latest
+          imagePullPolicy: IfNotPresent
+          env:
+            - name: SECRET_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: insurance-erp-secret
+                  key: SECRET_KEY
+            - name: DEBUG
+              valueFrom:
+                configMapKeyRef:
+                  name: insurance-erp-config
+                  key: DEBUG
+            - name: ALLOWED_HOSTS
+              valueFrom:
+                configMapKeyRef:
+                  name: insurance-erp-config
+                  key: ALLOWED_HOSTS
+            - name: CORS_ALLOWED_ORIGINS
+              valueFrom:
+                configMapKeyRef:
+                  name: insurance-erp-config
+                  key: CORS_ALLOWED_ORIGINS
+            - name: DATABASE_URL
+              valueFrom:
+                secretKeyRef:
+                  name: insurance-erp-secret
+                  key: DATABASE_URL
+            - name: REDIS_URL
+              valueFrom:
+                secretKeyRef:
+                  name: insurance-erp-secret
+                  key: REDIS_URL
+            - name: EMAIL_HOST
+              valueFrom:
+                configMapKeyRef:
+                  name: insurance-erp-config
+                  key: EMAIL_HOST
+            - name: EMAIL_PORT
+              valueFrom:
+                configMapKeyRef:
+                  name: insurance-erp-config
+                  key: EMAIL_PORT
+            - name: EMAIL_HOST_USER
+              valueFrom:
+                secretKeyRef:
+                  name: insurance-erp-secret
+                  key: EMAIL_HOST_USER
+            - name: EMAIL_HOST_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: insurance-erp-secret
+                  key: EMAIL_HOST_PASSWORD
+            - name: DEFAULT_FROM_EMAIL
+              valueFrom:
+                configMapKeyRef:
+                  name: insurance-erp-config
+                  key: DEFAULT_FROM_EMAIL
+            - name: SERVICE_ROLE
+              value: web
+          ports:
+            - containerPort: 8000
+          readinessProbe:
+            httpGet:
+              path: /api/auth/login/
+              port: 8000
+            initialDelaySeconds: 20
+            periodSeconds: 15
+          livenessProbe:
+            httpGet:
+              path: /api/auth/login/
+              port: 8000
+            initialDelaySeconds: 45
+            periodSeconds: 20
