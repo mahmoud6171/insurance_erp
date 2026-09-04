@@ -160,7 +160,7 @@ class PolicyAuditLog(models.Model):
     class Meta:
         ordering = ['-created_at']
         indexes = [
-            models.Index(fields=['policy', 'created_at'], name='policy_audit_policy_created_idx'),
+            models.Index(fields=['policy', 'created_at'], name='policy_audit_created_idx'),
         ]
 
     def __str__(self):

@@ -86,6 +86,6 @@ class Migration(migrations.Migration):
         ),
         migrations.AddIndex(
             model_name='policyauditlog',
-            index=models.Index(fields=['policy', 'created_at'], name='policy_audit_policy_created_idx'),
+            index=models.Index(fields=['policy', 'created_at'], name='policy_audit_created_idx'),
         ),
     ]
