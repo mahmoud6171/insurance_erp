@@ -47,20 +47,20 @@ jobs:
       - name: Run Django Checks
         working-directory: back_end
         env:
-          SECRET_KEY: ci-test-secret-key
+          SECRET_KEY: "ci-test-secret-key"
           DEBUG: "True"
-          DATABASE_URL: sqlite:///:memory:
-          REDIS_URL: redis://localhost:6379/0
+          DATABASE_URL: "sqlite:///:memory:"
+          REDIS_URL: "redis://localhost:6379/0"
         run: |
           python manage.py check
 
       - name: Run Tests
         working-directory: back_end
         env:
-          SECRET_KEY: ci-test-secret-key
+          SECRET_KEY: "ci-test-secret-key"
           DEBUG: "True"
-          DATABASE_URL: sqlite:///:memory:
-          REDIS_URL: redis://localhost:6379/0
+          DATABASE_URL: "sqlite:///:memory:"
+          REDIS_URL: "redis://localhost:6379/0"
         run: |
           pytest --disable-warnings || python manage.py test
 
