@@ -1,8 +1,11 @@
 import { useState } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
-import { ArrowLeft, Send, UserCheck, FileText, DollarSign, User, Paperclip } from 'lucide-react';
-import { getPolicy, submitPolicy, takePolicy, reviewPolicy } from '../../api/policies';
+import {
+  ArrowLeft, Send, UserCheck, FileText, DollarSign, User, Paperclip,
+  History, Users, Shield, Edit, AlertCircle, RefreshCw, Calendar, CheckCircle
+} from 'lucide-react';
+import { getPolicy, submitPolicy, takePolicy, reviewPolicy, updatePolicy, getPolicyAudit } from '../../api/policies';
 import { Card } from '../../components/common/Card';
 import { Badge } from '../../components/common/Badge';
 import { Button } from '../../components/common/Button';
@@ -25,10 +28,78 @@ function InfoRow({ label, value }) {
 
 function SectionHeader({ icon: Icon, label }) {
   return (
-    <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 18 }}>
+    <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 16 }}>
       <Icon size={15} color="var(--text-muted)" />
       <span style={{ fontSize: 12, fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.07em', color: 'var(--text-muted)' }}>{label}</span>
     </div>
+  );
+}
+
+function EditPolicyModal({ open, onClose, policy }) {
+  const [form, setForm] = useState({
+    client_name: policy.client_name || '',
+    client_email: policy.client_email || '',
+    client_phone: policy.client_phone || '',
+    client_address: policy.client_address || '',
+    coverage_type: policy.coverage_type || 'life',
+    coverage_amount: policy.coverage_amount || '',
+    premium_amount: policy.premium_amount || '',
+    start_date: policy.start_date || '',
+    end_date: policy.end_date || '',
+    notes: policy.notes || '',
+  });
+  const [conflictError, setConflictError] = useState(null);
+  const qc = useQueryClient();
+
+  const mut = useMutation({
+    mutationFn: (data) => updatePolicy(policy.id, data, policy.version),
+    onSuccess: () => {
+      toast.success('Policy updated!');
+      qc.invalidateQueries(['policy', policy.id]);
+      qc.invalidateQueries(['policies']);
+      onClose();
+    },
+    onError: (e) => {
+      if (e?.response?.status === 409) {
+        setConflictError('This policy was modified by another user. Please refresh to load the latest data.');
+      } else {
+        toast.error(getErrorMessage(e));
+      }
+    },
+  });
+
+  return (
+    <Modal open={open} onClose={onClose} title={`Edit Policy (${policy.reference_no})`} width={580}>
+      <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
+        {conflictError && (
+          <div style={{ padding: '12px 14px', background: '#FEF2F2', border: '1px solid #F87171', borderRadius: 'var(--radius)', display: 'flex', alignItems: 'center', gap: 10 }}>
+            <AlertCircle size={18} color="#DC2626" />
+            <div style={{ flex: 1, fontSize: 13, color: '#991B1B' }}>{conflictError}</div>
+            <Button size="sm" variant="secondary" icon={<RefreshCw size={13} />} onClick={() => {
+              qc.invalidateQueries(['policy', policy.id]);
+              onClose();
+            }}>Refresh</Button>
+          </div>
+        )}
+
+        <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12 }}>
+          <Input label="Client Name" value={form.client_name} onChange={e => setForm(p => ({ ...p, client_name: e.target.value }))} />
+          <Input label="Client Email" type="email" value={form.client_email} onChange={e => setForm(p => ({ ...p, client_email: e.target.value }))} />
+          <Input label="Client Phone" value={form.client_phone} onChange={e => setForm(p => ({ ...p, client_phone: e.target.value }))} />
+          <Input label="Annual Premium ($)" type="number" value={form.premium_amount} onChange={e => setForm(p => ({ ...p, premium_amount: e.target.value }))} />
+          <Input label="Start Date" type="date" value={form.start_date} onChange={e => setForm(p => ({ ...p, start_date: e.target.value }))} />
+          <Input label="End Date" type="date" value={form.end_date} onChange={e => setForm(p => ({ ...p, end_date: e.target.value }))} />
+          <div style={{ gridColumn: 'span 2' }}>
+            <Textarea label="Notes" value={form.notes} onChange={e => setForm(p => ({ ...p, notes: e.target.value }))} />
+          </div>
+        </div>
+
+        <div style={{ display: 'flex', gap: 10, justifyContent: 'flex-end', paddingTop: 4 }}>
+          <Button variant="secondary" onClick={onClose}>Cancel</Button>
+          <Button loading={mut.isPending} onClick={() => mut.mutate(form)}>Save Changes</Button>
+        </div>
+      </div>
+    </Modal>
   );
 }
 
@@ -56,8 +127,6 @@ function ReviewModal({ open, onClose, policyId }) {
   return (
     <Modal open={open} onClose={onClose} title="Submit Underwriter Review" width={500}>
       <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
-
-        {/* Decision selector */}
         <div style={{ display: 'flex', gap: 8 }}>
           {DECISIONS.map(({ value, label, color }) => (
             <button key={value} onClick={() => setForm(p => ({ ...p, decision: value }))}
@@ -105,7 +174,7 @@ function ReviewModal({ open, onClose, policyId }) {
   );
 }
 
-const TABS = ['Details', 'Reviews', 'Documents'];
+const TABS = ['Details', 'Beneficiaries & Coverage', 'Reviews', 'Documents', 'Audit Trail'];
 
 export default function PolicyDetailPage() {
   const { id } = useParams();
@@ -113,11 +182,18 @@ export default function PolicyDetailPage() {
   const { isEmployee, canReview } = useAuthStore();
   const qc = useQueryClient();
   const [showReview, setShowReview] = useState(false);
+  const [showEdit, setShowEdit] = useState(false);
   const [activeTab, setActiveTab] = useState('Details');
 
-  const { data: policy, isLoading } = useQuery({
+  const { data: policy, isLoading, refetch } = useQuery({
     queryKey: ['policy', id],
     queryFn: () => getPolicy(id).then(r => r.data),
+  });
+
+  const { data: auditLogs = [], isLoading: isAuditLoading } = useQuery({
+    queryKey: ['policy-audit', id],
+    queryFn: () => getPolicyAudit(id).then(r => r.data),
+    enabled: activeTab === 'Audit Trail',
   });
 
   const submitMut = useMutation({
@@ -138,27 +214,38 @@ export default function PolicyDetailPage() {
   const meta = STATUS_META[policy.status] || {};
 
   return (
-    <div className="animate-fade-up" style={{ display: 'flex', flexDirection: 'column', gap: 20, maxWidth: 900 }}>
+    <div className="animate-fade-up" style={{ display: 'flex', flexDirection: 'column', gap: 20, maxWidth: 960 }}>
 
       {/* ── Header ── */}
       <div style={{ display: 'flex', alignItems: 'center', gap: 14 }}>
         <Button variant="ghost" size="sm" icon={<ArrowLeft size={15} />} onClick={() => navigate('/policies')}>Back</Button>
         <div style={{ flex: 1 }}>
-          <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
             <span style={{ fontFamily: 'var(--font-mono)', fontWeight: 700, fontSize: 16 }}>{policy.reference_no}</span>
             <Badge {...meta} />
+            <span style={{ fontSize: 11, background: 'var(--surface-3)', color: 'var(--text-secondary)', padding: '2px 8px', borderRadius: 99, fontWeight: 600 }}>
+              v{policy.version || 1}
+            </span>
           </div>
-          <div style={{ fontSize: 13, color: 'var(--text-muted)', marginTop: 2 }}>Created {formatDateTime(policy.created_at)}</div>
+          <div style={{ fontSize: 13, color: 'var(--text-muted)', marginTop: 2 }}>
+            Created {formatDateTime(policy.created_at)}
+            {policy.renewal_date && (
+              <span style={{ marginLeft: 12, color: 'var(--brand-primary, #0284C7)', fontWeight: 500 }}>
+                • Renewal: {formatDate(policy.renewal_date)}
+              </span>
+            )}
+          </div>
         </div>
         <div style={{ display: 'flex', gap: 8 }}>
+          <Button variant="secondary" size="sm" icon={<Edit size={14} />} onClick={() => setShowEdit(true)}>Edit</Button>
           {policy.status === 'draft' && isEmployee() && (
-            <Button icon={<Send size={14} />} loading={submitMut.isPending} onClick={() => submitMut.mutate()}>Submit for Review</Button>
+            <Button icon={<Send size={14} />} loading={submitMut.isPending} onClick={() => submitMut.mutate()}>Submit</Button>
           )}
           {policy.status === 'pending' && canReview() && (
-            <Button icon={<UserCheck size={14} />} variant="amber" loading={takeMut.isPending} onClick={() => takeMut.mutate()}>Take for Review</Button>
+            <Button icon={<UserCheck size={14} />} variant="amber" loading={takeMut.isPending} onClick={() => takeMut.mutate()}>Take</Button>
           )}
           {policy.status === 'under_review' && canReview() && (
-            <Button icon={<FileText size={14} />} onClick={() => setShowReview(true)}>Submit Review</Button>
+            <Button icon={<FileText size={14} />} onClick={() => setShowReview(true)}>Review</Button>
           )}
         </div>
       </div>
@@ -177,6 +264,11 @@ export default function PolicyDetailPage() {
             {tab}
             {tab === 'Reviews' && policy.reviews?.length > 0 && (
               <span style={{ marginLeft: 6, fontSize: 10, fontWeight: 700, background: 'var(--surface-3)', color: 'var(--text-muted)', padding: '1px 6px', borderRadius: 99 }}>{policy.reviews.length}</span>
+            )}
+            {tab === 'Beneficiaries & Coverage' && (
+              <span style={{ marginLeft: 6, fontSize: 10, fontWeight: 700, background: 'var(--surface-3)', color: 'var(--text-muted)', padding: '1px 6px', borderRadius: 99 }}>
+                {(policy.beneficiaries?.length || 0) + (policy.coverage_items?.length || 0)}
+              </span>
             )}
           </button>
         ))}
@@ -204,10 +296,12 @@ export default function PolicyDetailPage() {
             <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 14 }}>
               <InfoRow label="Coverage Type"   value={COVERAGE_LABELS[policy.coverage_type]} />
               <InfoRow label="Coverage Amount" value={formatCurrency(policy.coverage_amount)} />
-              {policy.premium_amount && <InfoRow label="Premium"    value={formatCurrency(policy.premium_amount)} />}
-              {policy.risk_level     && <InfoRow label="Risk Level" value={<span style={{ textTransform: 'capitalize' }}>{policy.risk_level}</span>} />}
+              <InfoRow label="Annual Premium"  value={policy.premium_amount ? formatCurrency(policy.premium_amount) : '—'} />
+              <InfoRow label="Requires Approval" value={policy.requires_approval ? 'Yes (> $10,000)' : 'No'} />
               <InfoRow label="Start Date" value={formatDate(policy.start_date)} />
               <InfoRow label="End Date"   value={formatDate(policy.end_date)} />
+              <InfoRow label="Renewal Date" value={formatDate(policy.renewal_date)} />
+              <InfoRow label="Version" value={`v${policy.version || 1}`} />
               <InfoRow label="Requested By" value={policy.requested_by?.full_name} />
               {policy.assigned_to && <InfoRow label="Assigned To" value={policy.assigned_to?.full_name} />}
             </div>
@@ -215,6 +309,63 @@ export default function PolicyDetailPage() {
               <div style={{ marginTop: 14, padding: '10px 12px', background: 'var(--surface)', borderRadius: 'var(--radius)', fontSize: 13, color: 'var(--text-secondary)', borderLeft: '3px solid var(--border)', lineHeight: 1.6 }}>
                 {policy.notes}
               </div>
+            )}
+          </Card>
+        </div>
+      )}
+
+      {/* ── Tab: Beneficiaries & Coverage ── */}
+      {activeTab === 'Beneficiaries & Coverage' && (
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
+          <Card style={{ padding: 22 }}>
+            <SectionHeader icon={Users} label="Beneficiaries" />
+            {policy.beneficiaries?.length === 0 ? (
+              <div style={{ color: 'var(--text-muted)', fontSize: 13 }}>No beneficiaries specified for this policy.</div>
+            ) : (
+              <table style={{ width: '100%', borderCollapse: 'collapse' }}>
+                <thead>
+                  <tr style={{ borderBottom: '1px solid var(--border-soft)', textAlign: 'left', fontSize: 11, textTransform: 'uppercase', color: 'var(--text-muted)' }}>
+                    <th style={{ padding: '8px 12px' }}>Full Name</th>
+                    <th style={{ padding: '8px 12px' }}>Relationship</th>
+                    <th style={{ padding: '8px 12px', textAlign: 'right' }}>Benefit %</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {policy.beneficiaries.map((b) => (
+                    <tr key={b.id} style={{ borderBottom: '1px solid var(--border-soft)' }}>
+                      <td style={{ padding: '10px 12px', fontWeight: 500 }}>{b.full_name}</td>
+                      <td style={{ padding: '10px 12px', color: 'var(--text-secondary)' }}>{b.relationship}</td>
+                      <td style={{ padding: '10px 12px', textAlign: 'right', fontWeight: 600 }}>{b.benefit_percentage}%</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            )}
+          </Card>
+
+          <Card style={{ padding: 22 }}>
+            <SectionHeader icon={Shield} label="Coverage Items / Add-ons" />
+            {policy.coverage_items?.length === 0 ? (
+              <div style={{ color: 'var(--text-muted)', fontSize: 13 }}>No add-on coverage items attached.</div>
+            ) : (
+              <table style={{ width: '100%', borderCollapse: 'collapse' }}>
+                <thead>
+                  <tr style={{ borderBottom: '1px solid var(--border-soft)', textAlign: 'left', fontSize: 11, textTransform: 'uppercase', color: 'var(--text-muted)' }}>
+                    <th style={{ padding: '8px 12px' }}>Item Name</th>
+                    <th style={{ padding: '8px 12px', textAlign: 'right' }}>Limit</th>
+                    <th style={{ padding: '8px 12px', textAlign: 'right' }}>Deductible</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {policy.coverage_items.map((c) => (
+                    <tr key={c.id} style={{ borderBottom: '1px solid var(--border-soft)' }}>
+                      <td style={{ padding: '10px 12px', fontWeight: 500 }}>{c.name}</td>
+                      <td style={{ padding: '10px 12px', textAlign: 'right', fontWeight: 600 }}>{formatCurrency(c.limit)}</td>
+                      <td style={{ padding: '10px 12px', textAlign: 'right', color: 'var(--text-secondary)' }}>{formatCurrency(c.deductible)}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
             )}
           </Card>
         </div>
@@ -281,7 +432,40 @@ export default function PolicyDetailPage() {
         </Card>
       )}
 
+      {/* ── Tab: Audit Trail ── */}
+      {activeTab === 'Audit Trail' && (
+        <Card style={{ padding: 22 }}>
+          <SectionHeader icon={History} label="Immutable Audit Trail" />
+          {isAuditLoading ? <Loader /> : auditLogs.length === 0 ? (
+            <div style={{ color: 'var(--text-muted)', fontSize: 13 }}>No audit records found.</div>
+          ) : (
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
+              {auditLogs.map((log) => (
+                <div key={log.id} style={{ padding: '12px 16px', background: 'var(--surface)', borderRadius: 'var(--radius)', borderLeft: '3px solid var(--ink)' }}>
+                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 4 }}>
+                    <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
+                      <span style={{ fontWeight: 700, fontSize: 13, textTransform: 'uppercase', color: 'var(--ink)' }}>{log.action}</span>
+                      <span style={{ fontSize: 12, color: 'var(--text-secondary)' }}>by {log.actor?.full_name || 'System'}</span>
+                    </div>
+                    <span style={{ fontSize: 11, color: 'var(--text-muted)' }}>{formatDateTime(log.created_at)}</span>
+                  </div>
+                  {log.diff && Object.keys(log.diff).length > 0 && (
+                    <pre style={{ fontSize: 11, fontFamily: 'var(--font-mono)', background: 'var(--surface-2)', padding: '6px 10px', borderRadius: 4, margin: '6px 0 0', overflowX: 'auto' }}>
+                      {JSON.stringify(log.diff, null, 2)}
+                    </pre>
+                  )}
+                  {log.trace_id && (
+                    <div style={{ fontSize: 10, color: 'var(--text-muted)', marginTop: 4 }}>Trace ID: {log.trace_id}</div>
+                  )}
+                </div>
+              ))}
+            </div>
+          )}
+        </Card>
+      )}
+
       <ReviewModal open={showReview} onClose={() => setShowReview(false)} policyId={id} />
+      <EditPolicyModal open={showEdit} onClose={() => setShowEdit(false)} policy={policy} />
     </div>
   );
 }

@@ -23,7 +23,7 @@ export default function PoliciesPage() {
 
   const { data, isLoading, refetch } = useQuery({
     queryKey: ['policies', search, statusFilter],
-    queryFn: () => getPolicies({ search: search || undefined, status: statusFilter || undefined }).then(r => r.data),
+    queryFn: () => getPolicies({ q: search || undefined, search: search || undefined, status: statusFilter || undefined }).then(r => r.data),
   });
 
   const submitMut = useMutation({

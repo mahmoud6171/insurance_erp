@@ -9,3 +9,4 @@ resources:
   - backend.yaml
   - celery.yaml
   - frontend.yaml
+  - ingress.yaml

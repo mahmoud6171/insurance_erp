@@ -5,11 +5,11 @@ resources:
 namespace: insurance-erp
 images:
   - name: insurance-erp-backend
-    newName: your-registry.example.com/insurance-erp-backend
-    newTag: "2026.07.18"
+    newName: mahmoudsaeed10/insurance-erp-backend
+    newTag: "2026.09.05"
   - name: insurance-erp-frontend
-    newName: your-registry.example.com/insurance-erp-frontend
-    newTag: "2026.07.18"
+    newName: mahmoudsaeed10/insurance-erp-frontend
+    newTag: "2026.09.05"
 patches:
   - target:
       kind: Deployment
@@ -25,3 +25,64 @@ patches:
       - op: replace
         path: /spec/replicas
         value: 2
+  - target:
+      kind: Ingress
+      name: insurance-erp-ingress
+    patch: |-
+      apiVersion: networking.k8s.io/v1
+      kind: Ingress
+      metadata:
+        name: insurance-erp-ingress
+        annotations:
+          cert-manager.io/cluster-issuer: letsencrypt-prod
+      spec:
+        tls:
+          - hosts:
+              - erp.egtak.com
+            secretName: insurance-erp-tls
+        rules:
+          - host: erp.egtak.com
+            http:
+              paths:
+                - path: /api
+                  pathType: Prefix
+                  backend:
+                    service:
+                      name: backend
+                      port:
+                        number: 8000
+                - path: /admin
+                  pathType: Prefix
+                  backend:
+                    service:
+                      name: backend
+                      port:
+                        number: 8000
+                - path: /static
+                  pathType: Prefix
+                  backend:
+                    service:
+                      name: backend
+                      port:
+                        number: 8000
+                - path: /media
+                  pathType: Prefix
+                  backend:
+                    service:
+                      name: backend
+                      port:
+                        number: 8000
+                - path: /ws
+                  pathType: Prefix
+                  backend:
+                    service:
+                      name: backend
+                      port:
+                        number: 8000
+                - path: /
+                  pathType: Prefix
+                  backend:
+                    service:
+                      name: frontend
+                      port:
+                        number: 80

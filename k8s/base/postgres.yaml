@@ -55,6 +55,11 @@ spec:
               command: ["sh", "-c", "pg_isready -U $POSTGRES_USER -d $POSTGRES_DB"]
             initialDelaySeconds: 5
             periodSeconds: 5
-      volumes:
-        - name: postgres-data
-          emptyDir: {}
+  volumeClaimTemplates:
+    - metadata:
+        name: postgres-data
+      spec:
+        accessModes: ["ReadWriteOnce"]
+        resources:
+          requests:
+            storage: 2Gi

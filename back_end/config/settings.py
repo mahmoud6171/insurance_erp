@@ -138,6 +138,10 @@ CELERY_BEAT_SCHEDULE = {
         'task': 'apps.notifications.tasks.notify_expiring_policies',
         'schedule': crontab(hour=9, minute=0),
     },
+    'renewal-reminder': {
+        'task': 'apps.notifications.tasks.renewal_reminder',
+        'schedule': crontab(hour=9, minute=0),
+    },
     'weekly-task-digest': {
         'task': 'apps.notifications.tasks.send_weekly_task_digest',
         'schedule': crontab(hour=8, minute=0, day_of_week=1),

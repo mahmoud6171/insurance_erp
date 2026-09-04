@@ -265,6 +265,60 @@ def notify_expiring_policies():
 
 
 @shared_task
+def renewal_reminder():
+    """
+    Daily @ 9 AM — alert agents and clients about approved policies approaching renewal (30 days before renewal_date).
+    """
+    from datetime import timedelta, date
+    from apps.policies.models import PolicyRequest
+    from .services import create_and_push
+    from .models import Notification
+
+    today = date.today()
+    in_30_days = today + timedelta(days=30)
+
+    renewals = PolicyRequest.objects.filter(
+        status=PolicyRequest.Status.APPROVED,
+        renewal_date__isnull=False,
+        renewal_date__gte=today,
+        renewal_date__lte=in_30_days,
+    ).select_related('requested_by')
+
+    notified = 0
+    for policy in renewals:
+        days_left = (policy.renewal_date - today).days
+        title = f'Renewal Reminder: Policy {policy.reference_no} ({days_left} days)'
+        message = f'Policy {policy.reference_no} for {policy.client_name} is up for renewal on {policy.renewal_date.strftime("%B %d, %Y")}.'
+
+        create_and_push(
+            recipient=policy.requested_by,
+            notif_type=Notification.Type.RENEWAL_REMINDER,
+            title=title,
+            message=message,
+            object_type='policy',
+            object_id=str(policy.id),
+        )
+
+        if policy.requested_by.email:
+            _send_notification_email(
+                to=policy.requested_by.email,
+                subject=f'[InsureFlow] {title}',
+                body=f'Dear {policy.requested_by.full_name},\n\n{message}\nPlease review renewal options.\n\nInsureFlow ERP',
+            )
+
+        if policy.client_email:
+            _send_notification_email(
+                to=policy.client_email,
+                subject=f'[InsureFlow] Your policy {policy.reference_no} is up for renewal',
+                body=f'Dear {policy.client_name},\n\nYour {policy.get_coverage_type_display()} policy ({policy.reference_no}) is scheduled for renewal on {policy.renewal_date}.\n\nThank you for choosing InsureFlow.',
+            )
+
+        notified += 1
+
+    return f'Sent renewal reminders for {notified} policies.'
+
+
+@shared_task
 def send_weekly_task_digest():
     """
     Every Monday @ 8 AM — send each ops_manager a digest of open/overdue tasks.

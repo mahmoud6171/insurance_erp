@@ -1,0 +1,206 @@
+name: CI/CD Pipeline
+
+on:
+  push:
+    branches: [ "main" ]
+  pull_request:
+    branches: [ "main" ]
+  workflow_dispatch:
+    inputs:
+      deploy_to_k8s:
+        description: "Deploy to Kubernetes cluster (requires KUBECONFIG secret)"
+        required: false
+        type: boolean
+        default: true
+
+env:
+  BACKEND_IMAGE: mahmoudsaeed10/insurance-erp-backend
+  FRONTEND_IMAGE: mahmoudsaeed10/insurance-erp-frontend
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  # ---------------------------------------------------------------------------
+  # 1. Continuous Integration: Backend (Python / Django)
+  # ---------------------------------------------------------------------------
+  backend-ci:
+    name: Backend CI
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up Python 3.11
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: "pip"
+          cache-dependency-path: "back_end/requirements.txt"
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r back_end/requirements.txt
+
+      - name: Run Django Checks
+        working-directory: back_end
+        env:
+          SECRET_KEY: ci-test-secret-key
+          DEBUG: "True"
+          DATABASE_URL: sqlite:///:memory:
+          REDIS_URL: redis://localhost:6379/0
+        run: |
+          python manage.py check
+
+      - name: Run Tests
+        working-directory: back_end
+        env:
+          SECRET_KEY: ci-test-secret-key
+          DEBUG: "True"
+          DATABASE_URL: sqlite:///:memory:
+          REDIS_URL: redis://localhost:6379/0
+        run: |
+          pytest --disable-warnings || python manage.py test
+
+  # ---------------------------------------------------------------------------
+  # 2. Continuous Integration: Frontend (React / Vite)
+  # ---------------------------------------------------------------------------
+  frontend-ci:
+    name: Frontend CI
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up Node.js 20.x
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: "npm"
+          cache-dependency-path: "frontend/package.json"
+
+      - name: Install dependencies
+        working-directory: frontend
+        run: npm ci
+
+      - name: Build frontend bundle
+        working-directory: frontend
+        run: npm run build
+
+  # ---------------------------------------------------------------------------
+  # 3. Continuous Delivery: Build and Push Docker Images
+  # ---------------------------------------------------------------------------
+  docker-build-push:
+    name: Build & Push Docker Images
+    needs: [backend-ci, frontend-ci]
+    if: github.ref == 'refs/heads/main' || github.event_name == 'workflow_dispatch'
+    runs-on: ubuntu-latest
+    outputs:
+      image_tag: ${{ steps.vars.outputs.tag }}
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Log in to Docker Hub
+        uses: docker/login-action@v3
+        with:
+          username: ${{ secrets.DOCKERHUB_USERNAME }}
+          password: ${{ secrets.DOCKERHUB_TOKEN }}
+
+      - name: Compute image tags
+        id: vars
+        run: |
+          echo "tag=${{ github.sha }}" >> $GITHUB_OUTPUT
+
+      # Backend Build & Push
+      - name: Extract metadata (Backend)
+        id: meta-backend
+        uses: docker/metadata-action@v5
+        with:
+          images: ${{ env.BACKEND_IMAGE }}
+          tags: |
+            type=sha,format=long
+            type=raw,value=latest,enable=${{ github.ref == 'refs/heads/main' }}
+
+      - name: Build and push Backend image
+        uses: docker/build-push-action@v5
+        with:
+          context: ./back_end
+          file: ./back_end/Dockerfile
+          push: true
+          tags: ${{ steps.meta-backend.outputs.tags }}
+          labels: ${{ steps.meta-backend.outputs.labels }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+      # Frontend Build & Push
+      - name: Extract metadata (Frontend)
+        id: meta-frontend
+        uses: docker/metadata-action@v5
+        with:
+          images: ${{ env.FRONTEND_IMAGE }}
+          tags: |
+            type=sha,format=long
+            type=raw,value=latest,enable=${{ github.ref == 'refs/heads/main' }}
+
+      - name: Build and push Frontend image
+        uses: docker/build-push-action@v5
+        with:
+          context: ./frontend
+          file: ./frontend/Dockerfile
+          push: true
+          tags: ${{ steps.meta-frontend.outputs.tags }}
+          labels: ${{ steps.meta-frontend.outputs.labels }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+  # ---------------------------------------------------------------------------
+  # 4. Continuous Deployment: Kubernetes Rollout
+  # ---------------------------------------------------------------------------
+  k8s-deploy:
+    name: Deploy to Kubernetes
+    needs: [docker-build-push]
+    if: (github.ref == 'refs/heads/main' || github.event_name == 'workflow_dispatch') && (github.event.inputs.deploy_to_k8s != 'false')
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up Kustomize
+        uses: imranismail/setup-kustomize@v3
+
+      - name: Set up kubectl
+        uses: azure/setup-kubectl@v4
+
+      - name: Update image tags in production Kustomize
+        run: |
+          cd k8s/overlays/production
+          kustomize edit set image ${{ env.BACKEND_IMAGE }}=${{ env.BACKEND_IMAGE }}:${{ needs.docker-build-push.outputs.image_tag }}
+          kustomize edit set image ${{ env.FRONTEND_IMAGE }}=${{ env.FRONTEND_IMAGE }}:${{ needs.docker-build-push.outputs.image_tag }}
+
+      - name: Validate rendered manifests (Dry-run)
+        run: |
+          kubectl kustomize k8s/overlays/production
+
+      - name: Deploy to Kubernetes Cluster
+        if: env.HAS_KUBECONFIG == 'true'
+        env:
+          HAS_KUBECONFIG: ${{ secrets.KUBECONFIG != '' }}
+        run: |
+          mkdir -p $HOME/.kube
+          echo "${{ secrets.KUBECONFIG }}" | base64 -d > $HOME/.kube/config
+          kubectl apply -k k8s/overlays/production
+          kubectl rollout status deployment/backend -n insurance-erp --timeout=180s
+          kubectl rollout status deployment/frontend -n insurance-erp --timeout=180s
+
+      - name: Notice when KUBECONFIG is omitted
+        if: env.HAS_KUBECONFIG != 'true'
+        env:
+          HAS_KUBECONFIG: ${{ secrets.KUBECONFIG != '' }}
+        run: |
+          echo "::notice ::Images ${{ env.BACKEND_IMAGE }}:${{ needs.docker-build-push.outputs.image_tag }} and ${{ env.FRONTEND_IMAGE }}:${{ needs.docker-build-push.outputs.image_tag }} were pushed to Docker Hub, and manifests validated. Cluster deployment was skipped because the KUBECONFIG secret is not configured."

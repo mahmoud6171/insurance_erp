@@ -1,4 +1,6 @@
 import uuid
+import secrets
+import string
 from django.db import models
 from django.conf import settings
 
@@ -24,6 +26,7 @@ class PolicyRequest(models.Model):
     # ── Identity ──────────────────────────────────────────────────────────────
     id             = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
     reference_no   = models.CharField(max_length=20, unique=True, blank=True)
+    version        = models.PositiveIntegerField(default=1)
 
     # ── Ownership ─────────────────────────────────────────────────────────────
     requested_by   = models.ForeignKey(
@@ -49,9 +52,11 @@ class PolicyRequest(models.Model):
     premium_amount     = models.DecimalField(max_digits=14, decimal_places=2, null=True, blank=True)
     start_date         = models.DateField(null=True, blank=True)
     end_date           = models.DateField(null=True, blank=True)
+    renewal_date       = models.DateField(null=True, blank=True)
+    requires_approval  = models.BooleanField(default=False)
     risk_level         = models.CharField(
         max_length=10,
-        choices=[('low','Low'),('medium','Medium'),('high','High')],
+        choices=[('low', 'Low'), ('medium', 'Medium'), ('high', 'High')],
         blank=True
     )
     notes              = models.TextField(blank=True)
@@ -66,21 +71,30 @@ class PolicyRequest(models.Model):
 
     class Meta:
         ordering = ['-created_at']
+        indexes = [
+            models.Index(fields=['status', 'submitted_at'], name='policy_status_submitted_idx'),
+            models.Index(fields=['client_name'], name='policy_client_name_idx'),
+            models.Index(fields=['renewal_date'], name='policy_renewal_date_idx'),
+        ]
 
     def __str__(self):
         return f'{self.reference_no} — {self.client_name} ({self.status})'
 
+    def _generate_reference(self) -> str:
+        alphabet = string.ascii_uppercase + string.digits
+        return 'POL-' + ''.join(secrets.choice(alphabet) for _ in range(8))
+
     def save(self, *args, **kwargs):
         if not self.reference_no:
-            last = PolicyRequest.objects.order_by('-created_at').first()
-            num  = (int(last.reference_no.split('-')[1]) + 1) if last and last.reference_no else 1
-            self.reference_no = f'POL-{num:06d}'
+            self.reference_no = self._generate_reference()
+            while PolicyRequest.objects.filter(reference_no=self.reference_no).exists():
+                self.reference_no = self._generate_reference()
         super().save(*args, **kwargs)
 
     # ── FSM helpers ───────────────────────────────────────────────────────────
     VALID_TRANSITIONS = {
         Status.DRAFT:        [Status.PENDING],
-        Status.PENDING:      [Status.UNDER_REVIEW],
+        Status.PENDING:      [Status.APPROVED, Status.UNDER_REVIEW],
         Status.UNDER_REVIEW: [Status.APPROVED, Status.REJECTED, Status.MORE_INFO],
         Status.MORE_INFO:    [Status.PENDING],
         Status.APPROVED:     [],
@@ -99,7 +113,59 @@ class PolicyRequest(models.Model):
         self.status = new_status
         if new_status == self.Status.PENDING:
             self.submitted_at = timezone.now()
+        if new_status == self.Status.APPROVED and self.end_date and not self.renewal_date:
+            self.renewal_date = self.end_date
         self.save()
+
+
+class Beneficiary(models.Model):
+    id                 = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    policy             = models.ForeignKey(PolicyRequest, on_delete=models.CASCADE, related_name='beneficiaries')
+    full_name          = models.CharField(max_length=200)
+    relationship       = models.CharField(max_length=50)
+    benefit_percentage = models.DecimalField(max_digits=5, decimal_places=2)
+    created_at         = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        ordering = ['created_at']
+
+    def __str__(self):
+        return f'{self.full_name} ({self.relationship}) - {self.benefit_percentage}%'
+
+
+class CoverageItem(models.Model):
+    id          = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    policy      = models.ForeignKey(PolicyRequest, on_delete=models.CASCADE, related_name='coverage_items')
+    name        = models.CharField(max_length=100)
+    limit       = models.DecimalField(max_digits=14, decimal_places=2)
+    deductible  = models.DecimalField(max_digits=14, decimal_places=2, default=0.00)
+    created_at  = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        ordering = ['created_at']
+
+    def __str__(self):
+        return f'{self.name} (Limit: {self.limit}, Deductible: {self.deductible})'
+
+
+class PolicyAuditLog(models.Model):
+    id         = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    policy     = models.ForeignKey(PolicyRequest, on_delete=models.CASCADE, related_name='audit_logs')
+    actor      = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.PROTECT, null=True, blank=True)
+    action     = models.CharField(max_length=50)
+    diff       = models.JSONField(default=dict, blank=True)
+    trace_id   = models.CharField(max_length=36, blank=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        ordering = ['-created_at']
+        indexes = [
+            models.Index(fields=['policy', 'created_at'], name='policy_audit_policy_created_idx'),
+        ]
+
+    def __str__(self):
+        actor_name = self.actor.full_name if self.actor else 'System'
+        return f'[{self.action}] {self.policy.reference_no} by {actor_name} at {self.created_at}'
 
 
 class UnderwriterReview(models.Model):
@@ -118,7 +184,7 @@ class UnderwriterReview(models.Model):
     premium_suggested = models.DecimalField(max_digits=14, decimal_places=2, null=True, blank=True)
     risk_assessment   = models.CharField(
         max_length=10,
-        choices=[('low','Low'),('medium','Medium'),('high','High')],
+        choices=[('low', 'Low'), ('medium', 'Medium'), ('high', 'High')],
         blank=True
     )
     created_at    = models.DateTimeField(auto_now_add=True)
@@ -131,12 +197,12 @@ class UnderwriterReview(models.Model):
 
 
 class PolicyDocument(models.Model):
-    id         = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
-    policy     = models.ForeignKey(PolicyRequest, on_delete=models.CASCADE, related_name='documents')
+    id          = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    policy      = models.ForeignKey(PolicyRequest, on_delete=models.CASCADE, related_name='documents')
     uploaded_by = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.PROTECT)
-    name       = models.CharField(max_length=200)
-    file       = models.FileField(upload_to='policy_documents/')
-    created_at = models.DateTimeField(auto_now_add=True)
+    name        = models.CharField(max_length=200)
+    file        = models.FileField(upload_to='policy_documents/')
+    created_at  = models.DateTimeField(auto_now_add=True)
 
     def __str__(self):
         return f'{self.name} ({self.policy.reference_no})'

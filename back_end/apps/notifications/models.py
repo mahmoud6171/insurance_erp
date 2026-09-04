@@ -11,6 +11,7 @@ class Notification(models.Model):
         POLICY_APPROVED    = 'policy_approved',    'Policy Approved'
         POLICY_REJECTED    = 'policy_rejected',    'Policy Rejected'
         POLICY_MORE_INFO   = 'policy_more_info',   'More Info Needed'
+        RENEWAL_REMINDER   = 'renewal_reminder',   'Renewal Reminder'
         REVIEW_SUBMITTED   = 'review_submitted',   'Review Submitted'
         TASK_ASSIGNED      = 'task_assigned',      'Task Assigned'
         TASK_UPDATED       = 'task_updated',       'Task Updated'
