@@ -47,6 +47,8 @@ jobs:
       - name: Run Django Checks
         working-directory: back_end
         env:
+          DJANGO_SETTINGS_MODULE: config.settings
+          PYTHONPATH: .
           SECRET_KEY: "ci-test-secret-key"
           DEBUG: "True"
           DATABASE_URL: "sqlite:///:memory:"
@@ -57,6 +59,8 @@ jobs:
       - name: Run Tests
         working-directory: back_end
         env:
+          DJANGO_SETTINGS_MODULE: config.settings
+          PYTHONPATH: .
           SECRET_KEY: "ci-test-secret-key"
           DEBUG: "True"
           DATABASE_URL: "sqlite:///:memory:"
